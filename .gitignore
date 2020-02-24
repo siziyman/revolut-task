@@ -1,7 +1,6 @@
 Thumbs.db
 .DS_Store
 .gradle
-build/
 target/
 out/
 .idea
@@ -11,3 +10,7 @@ out/
 .project
 .settings
 .classpath
+
+!build/
+build/*
+!build/generated-src
