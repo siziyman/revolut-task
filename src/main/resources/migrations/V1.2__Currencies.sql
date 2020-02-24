@@ -1,0 +1,1 @@
+insert into PUBLIC.CURRENCIES VALUES ( 'GBP', 'pound sterling' ), ('EUR', 'euro'), ('USD', 'United States dollar');

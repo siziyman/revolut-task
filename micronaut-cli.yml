@@ -1,0 +1,5 @@
+profile: service
+defaultPackage: revolut.home.task
+---
+testFramework: kotlintest
+sourceLanguage: kotlin

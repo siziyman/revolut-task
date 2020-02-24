@@ -1,0 +1,10 @@
+GET http://localhost:8080/account/
+Accept: application/json
+Content-Type: application/json
+
+{
+  "id": 777,
+  "balance": 555
+}
+
+###
