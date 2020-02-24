@@ -33,7 +33,7 @@ dependencies {
     implementation 'io.micronaut.configuration:micronaut-jooq'
     implementation 'com.h2database:h2:1.4.200'
     implementation 'org.jooq:jooq-meta:3.12.4'
-    jooqRuntime 'com.h2database:h2:1.4.200'
+//    jooqRuntime 'com.h2database:h2:1.4.200'
     implementation 'io.micronaut.configuration:micronaut-flyway'
     kapt platform("io.micronaut:micronaut-bom:$micronautVersion")
     kapt "io.micronaut:micronaut-inject-java"
@@ -53,11 +53,13 @@ test.classpath += configurations.developmentOnly
 
 mainClassName = "revolut.home.task.Application"
 
+// This was used to codegen JOOQ schema sources:
+//
 //jooq {
 //    version = '3.12.4'
 //    edition = 'OSS'
 //    generateSchemaSourceOnCompilation = true
-//    sample(sourceSets.main) {
+//    task(sourceSets.main) {
 //        jdbc {
 //            driver = 'org.h2.Driver'
 //            url = 'jdbc:h2:~/h2-test'
@@ -98,18 +100,24 @@ mainClassName = "revolut.home.task.Application"
 //            }
 //            target {
 //                packageName = 'revolut.home.task.account'
-//                // directory = ...
+//                directory = 'src/generated/jooq'
 //            }
 //        }
 //    }
 //}
-
-generateSampleJooqSchemaSource {
-    outputs.upToDateWhen {false}
-}
+//
+//generateTaskJooqSchemaSource {
+//    outputs.upToDateWhen {false}
+//}
 
 test {
     useJUnitPlatform()
+}
+
+sourceSets {
+    main {
+        java.srcDirs+='src/generated/jooq'
+    }
 }
 
 allOpen {

@@ -15,3 +15,5 @@ out/
 build/*
 !build/generated-src
 build/generated/
+
+test.http
