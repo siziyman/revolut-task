@@ -10,10 +10,6 @@ out/
 .project
 .settings
 .classpath
-
-!build/
-build/*
-!build/generated-src
-build/generated/
+build
 
 test.http

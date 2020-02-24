@@ -25,7 +25,7 @@ class TransactionService(private val dslContext: DSLContext) {
 
             dslContext.transaction { configuration ->
                 val fetch = configuration.dsl().select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS)
-                        .where(ACCOUNTS.ID.eq(submitTransactionRequest.sender)).or(ACCOUNTS.ID.eq(submitTransactionRequest.recipient)).fetch()
+                        .where(ACCOUNTS.ID.eq(submitTransactionRequest.sender)).or(ACCOUNTS.ID.eq(submitTransactionRequest.recipient)).forUpdate().fetch()
                 if (fetch.size != 2) {
                     throw RestrictedActionException("Account not found")
                 }
