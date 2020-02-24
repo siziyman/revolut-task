@@ -14,3 +14,4 @@ out/
 !build/
 build/*
 !build/generated-src
+build/generated/

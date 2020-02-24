@@ -1,9 +1,7 @@
 package revolut.home.task.account
 
 import org.jooq.DSLContext
-import org.jooq.TransactionalRunnable
 import org.jooq.exception.DataAccessException
-import org.jooq.impl.DSL
 import org.jooq.impl.DSL.currentTimestamp
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -11,6 +9,8 @@ import revolut.home.task.account.Tables.ACCOUNTS
 import revolut.home.task.common.Currency
 import revolut.home.task.common.FailedOperationException
 import revolut.home.task.common.NotFoundException
+import revolut.home.task.common.RestrictedActionException
+import java.math.BigDecimal
 import java.sql.Timestamp
 import javax.inject.Singleton
 import kotlin.streams.toList
@@ -20,19 +20,24 @@ class AccountService constructor(private val dslContext: DSLContext) {
     private val logger: Logger = LoggerFactory.getLogger(AccountService::class.java)
     fun createAccount(request: CreateAccountRequest): AccountDTO {
         lateinit var accCreated: AccountDTO
+        if (request.balance < BigDecimal.ZERO) {
+            throw RestrictedActionException("Invalid account: balance should be positive")
+        }
         try {
-            dslContext.transaction(TransactionalRunnable { configuration ->
+            dslContext.transaction { configuration ->
                 val insertedAccount = configuration.dsl().insertInto(ACCOUNTS, ACCOUNTS.BALANCE, ACCOUNTS.CREATED, ACCOUNTS.CURRENCY)
-                        .values(request.balance, DSL.select(currentTimestamp()).fetchOne(0, Timestamp::class.java), request.currency.toString())
+                        .values(request.balance, dslContext.select(currentTimestamp()).fetchOne(0, Timestamp::class.java), request.currency.toString())
                         .returningResult(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).fetchOne()
                 accCreated = AccountDTO(insertedAccount.component1(), insertedAccount.component2(), Currency.valueOf(insertedAccount.component3()))
-
-            })
+            }
         } catch (e: RuntimeException) {
-            // It's up for debate whether we should (or not) expose internal errors
-            // assuming that API consumers are external entities/customers, we probably should not, therefore, rethrow w/o details
-            logger.error("createAccount(): ${e.message}")
-            throw FailedOperationException("Internal error creating account")
+            when (e) {
+                is FailedOperationException, is RestrictedActionException -> throw e
+                else -> {
+                    logger.error("submitTransaction(): ${e.message}")
+                    throw FailedOperationException("Internal error on transaction submission")
+                }
+            }
         }
         return accCreated
     }
