@@ -28,6 +28,12 @@ object AccountSpec : Spek(
                 var embeddedServer: EmbeddedServer = ApplicationContext.run(EmbeddedServer::class.java)
                 var client: HttpClient = HttpClient.create(embeddedServer.url)
 
+                beforeEachTest {
+                    embeddedServer.close()
+                    embeddedServer = ApplicationContext.run(EmbeddedServer::class.java)
+                    client = HttpClient.create(embeddedServer.url)
+                }
+
                 it("List accounts for empty DB") {
                     val response = client.toBlocking().retrieve(endpointUrl)
                     assertEquals("[]", response)
@@ -80,11 +86,9 @@ object AccountSpec : Spek(
                     }
                 }
 
-                afterGroup {
+                afterEachTest {
                     client.close()
                     embeddedServer.close()
-                    embeddedServer = ApplicationContext.run(EmbeddedServer::class.java)
-                    client = HttpClient.create(embeddedServer.url)
                 }
             }
         }

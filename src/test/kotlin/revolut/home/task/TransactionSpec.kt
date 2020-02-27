@@ -31,6 +31,9 @@ object TransactionSpec : Spek(
             val idSet = setOf<Int>().toMutableSet()
             describe("Transaction test suite") {
                 beforeEachTest {
+                    embeddedServer.close()
+                    embeddedServer = ApplicationContext.run(EmbeddedServer::class.java)
+                    client = HttpClient.create(embeddedServer.url)
                     //create a couple of "filled" accounts, remove previous ones from set
                     idSet.clear()
                     val id1 = createAccount(client, BigDecimal.TEN)
@@ -102,8 +105,6 @@ object TransactionSpec : Spek(
                 afterEachTest {
                     client.close()
                     embeddedServer.close()
-                    embeddedServer = ApplicationContext.run(EmbeddedServer::class.java)
-                    client = HttpClient.create(embeddedServer.url)
                 }
             }
         }
