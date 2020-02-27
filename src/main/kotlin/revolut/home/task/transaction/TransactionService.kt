@@ -1,5 +1,6 @@
 package revolut.home.task.transaction
 
+import org.jooq.Configuration
 import org.jooq.DSLContext
 import org.jooq.exception.DataAccessException
 import org.jooq.impl.DSL
@@ -21,42 +22,18 @@ class TransactionService(private val dslContext: DSLContext) {
     private val logger: Logger = LoggerFactory.getLogger(TransactionService::class.java)
     fun submitTransaction(submitTransactionRequest: SubmitTransactionRequest): TransactionDTO {
         lateinit var transactionCreated: TransactionDTO
+        if (submitTransactionRequest.sender == submitTransactionRequest.recipient) {
+            throw RestrictedActionException("Cannot transfer to the same account")
+        }
         try {
-
             dslContext.transaction { configuration ->
-                val fetch = configuration.dsl().select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS)
-                        .where(ACCOUNTS.ID.eq(submitTransactionRequest.sender)).or(ACCOUNTS.ID.eq(submitTransactionRequest.recipient)).forUpdate().fetch()
-                if (fetch.size != 2) {
-                    throw RestrictedActionException("Account not found")
-                }
-                val (senderAccount, recipientAccount) = when {
-                    (fetch[0].value1() == submitTransactionRequest.sender) -> listOf(
-                            AccountDTO(fetch[0].value1(), fetch[0].value2(), Currency.valueOf(fetch[0].value3())), AccountDTO(fetch[1].value1(), fetch[1].value2(), Currency.valueOf(fetch[1].value3())))
-                    else -> listOf(AccountDTO(fetch[1].value1(), fetch[1].value2(), Currency.valueOf(fetch[1].value3())), AccountDTO(fetch[0].value1(), fetch[0].value2(), Currency.valueOf(fetch[0].value3())))
-                }
-                if (senderAccount.currency != recipientAccount.currency) {
-                    throw RestrictedActionException("Account currencies do not match")
-                }
-                if (senderAccount.balance < submitTransactionRequest.amount) {
-                    throw RestrictedActionException("Account balance is too low")
-                }
-                val minusExecution = dslContext.update(ACCOUNTS).set(ACCOUNTS.BALANCE, ACCOUNTS.BALANCE.minus(submitTransactionRequest.amount)).where(ACCOUNTS.ID.eq(submitTransactionRequest.sender)).execute()
-                if (minusExecution != 1) {
-                    throw FailedOperationException("Transaction failed unexpectedly")
-                }
-                val plusExecution = dslContext.update(ACCOUNTS).set(ACCOUNTS.BALANCE, ACCOUNTS.BALANCE.plus(submitTransactionRequest.amount)).where(ACCOUNTS.ID.eq(submitTransactionRequest.recipient)).execute()
-                if (plusExecution != 1) {
-                    throw FailedOperationException("Transaction failed unexpectedly")
-                }
-                val insertionResult = dslContext.insertInto(TRANSACTIONS, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT, TRANSACTIONS.SENT).values(submitTransactionRequest.sender, submitTransactionRequest.recipient, submitTransactionRequest.amount,
-                        dslContext.select(DSL.currentTimestamp()).fetchOne(0, Timestamp::class.java)).returningResult(TRANSACTIONS.ID, TRANSACTIONS.SENT).fetchOne()
-                transactionCreated = TransactionDTO(insertionResult.value1(), submitTransactionRequest.sender, submitTransactionRequest.recipient, submitTransactionRequest.amount, insertionResult.value2())
+                transactionCreated = performSubmitTransaction(configuration, submitTransactionRequest)
             }
         } catch (e: RuntimeException) {
             when (e) {
                 is FailedOperationException, is RestrictedActionException -> throw e
                 else -> {
-                    logger.error("submitTransaction(): ${e.message}")
+                    logger.error("submitTransaction(): $e")
                     throw FailedOperationException("Internal error on transaction submission")
                 }
             }
@@ -66,8 +43,12 @@ class TransactionService(private val dslContext: DSLContext) {
 
     fun getAll(): List<TransactionDTO> {
         try {
-            val result = dslContext.select(TRANSACTIONS.ID, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT, TRANSACTIONS.SENT).from(TRANSACTIONS).fetch().stream()
-            return result.map { TransactionDTO(it.value1(), it.value2(), it.value3(), it.value4(), it.value5()) }.toList()
+            val result = dslContext.select(
+                    TRANSACTIONS.ID, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT,
+                    TRANSACTIONS.SENT).from(TRANSACTIONS).fetch().stream()
+            return result
+                .map { TransactionDTO(it.value1(), it.value2(), it.value3(), it.value4(), it.value5().toString()) }
+                .toList()
         } catch (e: DataAccessException) {
             logger.error("getAll(): ${e.message}")
             throw FailedOperationException("Internal error getting transactions list")
@@ -76,11 +57,18 @@ class TransactionService(private val dslContext: DSLContext) {
 
     fun getOne(id: Long): TransactionDTO {
         try {
-            val result = dslContext.select(TRANSACTIONS.ID, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT, TRANSACTIONS.SENT).from(TRANSACTIONS).where(TRANSACTIONS.ID.eq(id)).fetch()
-            if (result.size == 0) {
-                throw NotFoundException("Account with ID $id not found")
+            if (id < 0) {
+                throw RestrictedActionException("Invalid ID")
             }
-            return TransactionDTO(result[0].value1(), result[0].value2(), result[0].value3(), result[0].value4(), result[0].value5())
+            val transactionRecord = dslContext.select(
+                    TRANSACTIONS.ID, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT,
+                    TRANSACTIONS.SENT).from(TRANSACTIONS).where(TRANSACTIONS.ID.eq(id)).fetch()
+            if (transactionRecord.size == 0) {
+                throw NotFoundException("Transaction with ID $id not found")
+            }
+            return TransactionDTO(transactionRecord[0].value1(), transactionRecord[0].value2(),
+                                  transactionRecord[0].value3(), transactionRecord[0].value4(),
+                                  transactionRecord[0].value5().toString())
         } catch (e: DataAccessException) {
             logger.error("getOne(): ${e.message}")
             throw FailedOperationException("Internal error getting transaction $id")
@@ -89,12 +77,74 @@ class TransactionService(private val dslContext: DSLContext) {
 
     fun getTransactionsByAccount(id: Long): List<TransactionDTO> {
         try {
-            val result = dslContext.select(TRANSACTIONS.ID, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT, TRANSACTIONS.SENT).from(TRANSACTIONS)
-                    .where(TRANSACTIONS.SENDER.eq(id)).or(TRANSACTIONS.RECIPIENT.eq(id)).fetch().stream()
-            return result.map { TransactionDTO(it.value1(), it.value2(), it.value3(), it.value4(), it.value5()) }.toList()
+            val result = dslContext.select(
+                    TRANSACTIONS.ID, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT,
+                    TRANSACTIONS.SENT).from(TRANSACTIONS).where(TRANSACTIONS.SENDER.eq(id))
+                .or(TRANSACTIONS.RECIPIENT.eq(id)).fetch().stream()
+            return result
+                .map { TransactionDTO(it.value1(), it.value2(), it.value3(), it.value4(), it.value5().toString()) }
+                .toList()
         } catch (e: DataAccessException) {
             logger.error("getTransactionsByAccount(): ${e.message}")
             throw FailedOperationException("Internal error getting transactions list")
+        }
+    }
+
+    private fun performSubmitTransaction(configuration: Configuration,
+                                         submitTransactionRequest: SubmitTransactionRequest): TransactionDTO {
+
+        val (senderAccount, recipientAccount) = getSendAndReceiveAccounts(configuration, submitTransactionRequest)
+        if (senderAccount.currency != recipientAccount.currency) {
+            throw RestrictedActionException("Account currencies do not match")
+        }
+        if (senderAccount.balance < submitTransactionRequest.amount) {
+            throw RestrictedActionException("Account balance is too low")
+        }
+        updateBalances(configuration, submitTransactionRequest)
+        val insertionResult = DSL.using(configuration).insertInto(
+                TRANSACTIONS, TRANSACTIONS.SENDER, TRANSACTIONS.RECIPIENT, TRANSACTIONS.AMOUNT,
+                TRANSACTIONS.SENT)
+            .values(submitTransactionRequest.sender, submitTransactionRequest.recipient,
+                    submitTransactionRequest.amount,
+                    DSL.using(configuration).select(DSL.currentTimestamp()).fetchOne(0, Timestamp::class.java))
+            .returningResult(TRANSACTIONS.ID, TRANSACTIONS.SENT).fetchOne()
+        return TransactionDTO(insertionResult.value1(), submitTransactionRequest.sender,
+                              submitTransactionRequest.recipient, submitTransactionRequest.amount,
+                              insertionResult.value2().toString())
+    }
+
+    private fun updateBalances(configuration: Configuration, submitTransactionRequest: SubmitTransactionRequest) {
+        val minusRowsUpdated =
+                DSL.using(configuration).update(ACCOUNTS)
+                    .set(ACCOUNTS.BALANCE, ACCOUNTS.BALANCE.minus(submitTransactionRequest.amount))
+                    .where(ACCOUNTS.ID.eq(submitTransactionRequest.sender)).execute()
+        if (minusRowsUpdated != 1) {
+            throw FailedOperationException("Transaction failed unexpectedly")
+        }
+        val plusRowsUpdated =
+                DSL.using(configuration).update(ACCOUNTS)
+                    .set(ACCOUNTS.BALANCE, ACCOUNTS.BALANCE.plus(submitTransactionRequest.amount))
+                    .where(ACCOUNTS.ID.eq(submitTransactionRequest.recipient)).execute()
+        if (plusRowsUpdated != 1) {
+            throw FailedOperationException("Transaction failed unexpectedly")
+        }
+    }
+
+    private fun getSendAndReceiveAccounts(configuration: Configuration,
+                                          submitTransactionRequest: SubmitTransactionRequest): Pair<AccountDTO, AccountDTO> {
+        val accounts =
+                DSL.using(configuration).select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS)
+                    .where(ACCOUNTS.ID.eq(submitTransactionRequest.sender))
+                    .or(ACCOUNTS.ID.eq(submitTransactionRequest.recipient)).forUpdate().fetch()
+        if (accounts.size != 2) {
+            throw RestrictedActionException("Account not found")
+        }
+        return when {
+            (accounts[0].value1() == submitTransactionRequest.sender) ->
+                AccountDTO(accounts[0].value1(), accounts[0].value2(), Currency.valueOf(accounts[0].value3())) to
+                        AccountDTO(accounts[1].value1(), accounts[1].value2(), Currency.valueOf(accounts[1].value3()))
+            else -> AccountDTO(accounts[1].value1(), accounts[1].value2(), Currency.valueOf(accounts[1].value3())) to
+                    AccountDTO(accounts[0].value1(), accounts[0].value2(), Currency.valueOf(accounts[0].value3()))
         }
     }
 }

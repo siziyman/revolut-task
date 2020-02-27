@@ -25,10 +25,14 @@ class AccountService constructor(private val dslContext: DSLContext) {
         }
         try {
             dslContext.transaction { configuration ->
-                val insertedAccount = configuration.dsl().insertInto(ACCOUNTS, ACCOUNTS.BALANCE, ACCOUNTS.CREATED, ACCOUNTS.CURRENCY)
-                        .values(request.balance, dslContext.select(currentTimestamp()).fetchOne(0, Timestamp::class.java), request.currency.toString())
-                        .returningResult(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).fetchOne()
-                accCreated = AccountDTO(insertedAccount.component1(), insertedAccount.component2(), Currency.valueOf(insertedAccount.component3()))
+                val insertedAccount =
+                        configuration.dsl().insertInto(ACCOUNTS, ACCOUNTS.BALANCE, ACCOUNTS.CREATED, ACCOUNTS.CURRENCY)
+                            .values(request.balance,
+                                    dslContext.select(currentTimestamp()).fetchOne(0, Timestamp::class.java),
+                                    request.currency.toString())
+                            .returningResult(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).fetchOne()
+                accCreated = AccountDTO(insertedAccount.component1(), insertedAccount.component2(),
+                                        Currency.valueOf(insertedAccount.component3()))
             }
         } catch (e: RuntimeException) {
             when (e) {
@@ -45,7 +49,8 @@ class AccountService constructor(private val dslContext: DSLContext) {
     fun getAll(): List<AccountDTO> {
         // Decided to stay away from AOP as a replacement for try/catch boilerplate & error logging for simplicity "here and now"
         try {
-            val result = dslContext.select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS).fetch().stream()
+            val result =
+                    dslContext.select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS).fetch().stream()
             return result.map { AccountDTO(it.value1(), it.value2(), Currency.valueOf(it.value3())) }.toList()
         } catch (e: DataAccessException) {
             logger.error("getAll(): ${e.message}")
@@ -54,8 +59,12 @@ class AccountService constructor(private val dslContext: DSLContext) {
     }
 
     fun getOne(id: Long): AccountDTO {
+        if (id < 0) {
+            throw RestrictedActionException("Invalid ID")
+        }
         try {
-            val result = dslContext.select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS).where(ACCOUNTS.ID.eq(id)).fetch()
+            val result = dslContext.select(ACCOUNTS.ID, ACCOUNTS.BALANCE, ACCOUNTS.CURRENCY).from(ACCOUNTS)
+                .where(ACCOUNTS.ID.eq(id)).fetch()
             if (result.size == 0) {
                 throw NotFoundException("Account with ID $id not found")
             }
